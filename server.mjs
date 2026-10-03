@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sync, ensureCache, loadCache } from './lib/hevy.mjs';
 import * as A from './lib/analytics.mjs';
+import { chat, providers } from './lib/chat.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 4321;
@@ -36,9 +37,33 @@ const routes = {
   },
 };
 
+async function readJson(req) {
+  let body = '';
+  for await (const chunk of req) body += chunk;
+  return JSON.parse(body || '{}');
+}
+
+// Streams newline-delimited JSON events: conversation, text, tool, error, done.
+async function handleChat(req, res) {
+  const { conversationId, provider, message } = await readJson(req);
+  if (!message?.trim()) return json(res, { error: 'empty message' }, 400);
+  res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' });
+  const emit = e => res.write(JSON.stringify(e) + '\n');
+  try {
+    await chat({ conversationId, provider, message }, emit);
+    emit({ type: 'done' });
+  } catch (err) {
+    console.error(err);
+    emit({ type: 'error', message: err.message });
+  }
+  res.end();
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
+    if (req.method === 'GET' && url.pathname === '/api/chat/providers') return json(res, providers());
+    if (req.method === 'POST' && url.pathname === '/api/chat') return handleChat(req, res);
     if (req.method === 'POST' && url.pathname === '/api/sync') {
       return json(res, await sync({ full: url.searchParams.has('full'), log: console.log }));
     }

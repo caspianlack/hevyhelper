@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hevy Viewer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <style>
 :root {
   color-scheme: light;
@@ -67,6 +69,31 @@ td.num, th.num { text-align: right; }
 .badge.progressing { color: var(--good); } .badge.stalled { color: var(--warn); } .badge.regressing { color: var(--crit); }
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 .row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+/* ---- chat drawer ---- */
+#chat { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; z-index: 20; transform: translateX(100%); transition: transform .2s ease; box-shadow: -8px 0 24px rgba(0,0,0,.12); }
+#chat.open { transform: none; }
+.chat-head { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.chat-head h2 { font-size: 15px; margin: 0; flex: 1; }
+.chat-head button { padding: 4px 10px; }
+#chat-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 100%; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; background: var(--s1); color: #fff; padding: 8px 12px; border-radius: 12px 12px 2px 12px; max-width: 85%; white-space: pre-wrap; }
+.msg.bot { line-height: 1.55; }
+.msg.bot p { margin: 0 0 8px; } .msg.bot ul, .msg.bot ol { margin: 0 0 8px; padding-left: 20px; }
+.msg.bot table { font-size: 13px; margin: 8px 0; display: block; overflow-x: auto; }
+.msg.bot code { background: var(--bg); padding: 1px 4px; border-radius: 4px; font-size: 12.5px; }
+.msg.bot h1, .msg.bot h2, .msg.bot h3 { font-size: 14px; margin: 12px 0 6px; }
+.msg.err { color: var(--crit); font-size: 13px; }
+.tool-call { font-size: 12px; color: var(--muted); margin: 2px 0; }
+.tool-call::before { content: '⚙ '; }
+.typing::after { content: '▍'; animation: blink 1s steps(2) infinite; color: var(--muted); }
+@keyframes blink { 50% { opacity: 0; } }
+.suggest { display: flex; flex-wrap: wrap; gap: 6px; }
+.suggest button { font-size: 12.5px; border-radius: 999px; padding: 4px 10px; color: var(--text-2); }
+.chat-foot { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
+#chat-input { flex: 1; resize: none; min-height: 40px; max-height: 160px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; }
+#chat-hint { font-size: 12px; color: var(--muted); padding: 0 16px 8px; }
+#chat-fab { position: fixed; right: 20px; bottom: 20px; z-index: 15; border-radius: 999px; padding: 10px 18px; box-shadow: 0 4px 14px rgba(0,0,0,.2); font-weight: 600; }
 #error { display: none; grid-column: span 12; background: color-mix(in srgb, var(--crit) 12%, var(--surface)); border-color: var(--crit); }
 </style>
 </head>
@@ -83,7 +110,8 @@ td.num, th.num { text-align: right; }
       <option value="26">26 weeks</option>
       <option value="52">52 weeks</option>
     </select>
-    <button class="primary" id="sync">Sync</button>
+    <button id="sync">Sync</button>
+    <button class="primary" id="chat-open">Ask AI</button>
   </div>
 </header>
 
@@ -127,6 +155,30 @@ td.num, th.num { text-align: right; }
     <div class="scroll"><table id="prs"></table></div>
   </div>
 </main>
+
+<button class="primary" id="chat-fab" aria-label="Ask AI about your training">💬 Ask AI</button>
+<aside id="chat" aria-label="AI coach chat">
+  <div class="chat-head">
+    <h2>Ask about your training</h2>
+    <select id="chat-provider" aria-label="AI provider"></select>
+    <button id="chat-new" title="New conversation">New</button>
+    <button id="chat-close" aria-label="Close">✕</button>
+  </div>
+  <div id="chat-log">
+    <div class="suggest" id="chat-suggest">
+      <button>Review my last 4 weeks of training</button>
+      <button>Which lifts are stalling and why?</button>
+      <button>Am I doing enough volume for each muscle group?</button>
+      <button>How has my bench press progressed?</button>
+      <button>What should I change in my program next block?</button>
+    </div>
+  </div>
+  <div id="chat-hint"></div>
+  <div class="chat-foot">
+    <textarea id="chat-input" rows="1" placeholder="Ask anything about your workouts…"></textarea>
+    <button class="primary" id="chat-send">Send</button>
+  </div>
+</aside>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -313,6 +365,128 @@ $('sync').onclick = async e => {
 };
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => D && render());
 load();
+
+// ---------- chat ----------
+const chatState = { id: null, busy: false, providers: [] };
+const md = t => DOMPurify.sanitize(marked.parse(t));
+const toolLabel = (name, input) => {
+  const args = Object.entries(input || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+  return `${name.replace(/_/g, ' ')}${args ? ` (${args})` : ''}`;
+};
+
+async function loadProviders() {
+  try { chatState.providers = await api('/api/chat/providers'); } catch { chatState.providers = []; }
+  const sel = $('chat-provider');
+  sel.innerHTML = chatState.providers.map(p => `<option value="${p.id}" ${p.available ? '' : 'disabled'}>${p.label}${p.available ? '' : ' (no key)'}</option>`).join('');
+  const first = chatState.providers.find(p => p.available);
+  if (first) sel.value = first.id;
+  updateHint();
+}
+
+function updateHint() {
+  const p = chatState.providers.find(x => x.id === $('chat-provider').value);
+  $('chat-hint').textContent = !chatState.providers.some(x => x.available)
+    ? 'No AI key configured. Add ANTHROPIC_API_KEY and/or OPENAI_API_KEY to .env, then restart the server.'
+    : p ? `${p.label} · ${p.model} · reads your workouts through tools` : '';
+}
+
+function openChat(open = true) {
+  $('chat').classList.toggle('open', open);
+  $('chat-fab').style.display = open ? 'none' : '';
+  if (open) $('chat-input').focus();
+}
+
+function addMsg(cls, html) {
+  const el = document.createElement('div');
+  el.className = `msg ${cls}`;
+  el.innerHTML = html;
+  $('chat-log').appendChild(el);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  return el;
+}
+
+async function sendChat(text) {
+  text = text.trim();
+  if (!text || chatState.busy) return;
+  chatState.busy = true;
+  $('chat-send').disabled = true;
+  $('chat-suggest').style.display = 'none';
+  $('chat-input').value = '';
+  autosize();
+  addMsg('user', esc(text));
+
+  const bot = addMsg('bot typing', '');
+  const toolsEl = document.createElement('div');
+  const body = document.createElement('div');
+  bot.append(toolsEl, body);
+  let buf = '';
+  const log = $('chat-log');
+
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ conversationId: chatState.id, provider: $('chat-provider').value, message: text }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let pending = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += dec.decode(value, { stream: true });
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      for (const line of lines) {
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === 'conversation') chatState.id = ev.id;
+        else if (ev.type === 'text') { buf += ev.text; body.innerHTML = md(buf); }
+        else if (ev.type === 'tool') {
+          const t = document.createElement('div');
+          t.className = 'tool-call';
+          t.textContent = toolLabel(ev.name, ev.input);
+          toolsEl.appendChild(t);
+        }
+        else if (ev.type === 'error') addMsg('err', esc(ev.message));
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+  } catch (e) {
+    addMsg('err', esc(e.message));
+  } finally {
+    bot.classList.remove('typing');
+    if (!buf && !toolsEl.childElementCount) bot.remove();
+    chatState.busy = false;
+    $('chat-send').disabled = false;
+    $('chat-input').focus();
+  }
+}
+
+function newChat() {
+  chatState.id = null;
+  $('chat-log').querySelectorAll('.msg').forEach(el => el.remove());
+  $('chat-suggest').style.display = '';
+}
+
+function autosize() {
+  const t = $('chat-input');
+  t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight, 160) + 'px';
+}
+
+$('chat-open').onclick = $('chat-fab').onclick = () => openChat(true);
+$('chat-close').onclick = () => openChat(false);
+$('chat-new').onclick = newChat;
+$('chat-provider').onchange = () => { newChat(); updateHint(); };
+$('chat-send').onclick = () => sendChat($('chat-input').value);
+$('chat-input').oninput = autosize;
+$('chat-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(e.target.value); } };
+$('chat-suggest').onclick = e => { if (e.target.tagName === 'BUTTON') sendChat(e.target.textContent); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') openChat(false); });
+loadProviders();
+if (location.hash === '#chat') openChat(true);
 </script>
 </body>
 </html>
