@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hevy Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f4f2; --surface: #fcfcfb; --border: #e4e3df;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984; --grid: #ecebe7;
+  --s1: #2a78d6; --s2: #eb6834;
+  --good: #0ca30c; --warn: #fab219; --crit: #d03b3b;
+  --seq-0: #f0efec; --seq-rgb: 42,120,214;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2c;
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #8f8e86; --grid: #2a2a28;
+    --s1: #3987e5; --s2: #d95926; --seq-0: #232322; --seq-rgb: 57,135,229;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 18px; margin: 0; }
+header .meta { color: var(--text-2); font-size: 13px; }
+.controls { display: flex; gap: 8px; align-items: center; }
+select, button, input { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+button:disabled { opacity: .6; cursor: wait; }
+main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.card h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+.card h2 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-7 { grid-column: span 7; } .span-6 { grid-column: span 6; } .span-5 { grid-column: span 5; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; }
+@media (max-width: 900px) { main { padding: 16px; } [class*="span-"] { grid-column: span 12; } .kpi { grid-column: span 6; } }
+.kpi .label { color: var(--text-2); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.kpi .value { font-size: 30px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.kpi .sub { color: var(--muted); font-size: 12px; }
+.chart-box { position: relative; height: 260px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-2); font-weight: 500; font-size: 12px; position: sticky; top: 0; background: var(--surface); }
+td.num, th.num { text-align: right; }
+.scroll { max-height: 420px; overflow: auto; }
+.heat td { text-align: center; padding: 4px 2px; border: 2px solid var(--surface); border-radius: 4px; font-size: 12px; min-width: 32px; }
+.heat td.m { text-align: left; padding-right: 10px; color: var(--text-2); }
+.heat th { text-align: center; font-size: 11px; }
+.wlist { max-height: 520px; overflow: auto; }
+.witem { padding: 10px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.witem:hover { background: var(--bg); }
+.witem.active { border-color: var(--s1); }
+.witem .t { font-weight: 600; }
+.witem .d { color: var(--text-2); font-size: 12px; }
+.ex { margin-bottom: 14px; }
+.ex .name { font-weight: 600; margin-bottom: 4px; }
+.ex .note { color: var(--text-2); font-style: italic; font-size: 13px; margin-bottom: 4px; }
+.sets { display: flex; flex-wrap: wrap; gap: 6px; }
+.set { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.set.warmup { color: var(--muted); border-style: dashed; }
+.badge { font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.badge.progressing { color: var(--good); } .badge.stalled { color: var(--warn); } .badge.regressing { color: var(--crit); }
+.empty { color: var(--muted); padding: 24px; text-align: center; }
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+#error { display: none; grid-column: span 12; background: color-mix(in srgb, var(--crit) 12%, var(--surface)); border-color: var(--crit); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Hevy Viewer</h1>
+    <div class="meta" id="meta">Loading…</div>
+  </div>
+  <div class="controls">
+    <select id="weeks" aria-label="Time range">
+      <option value="8">8 weeks</option>
+      <option value="12" selected>12 weeks</option>
+      <option value="26">26 weeks</option>
+      <option value="52">52 weeks</option>
+    </select>
+    <button class="primary" id="sync">Sync</button>
+  </div>
+</header>
+
+<main>
+  <div class="card" id="error"></div>
+
+  <div class="card kpi span-3"><div class="label">Workouts</div><div class="value" id="k-workouts">–</div><div class="sub" id="k-workouts-sub"></div></div>
+  <div class="card kpi span-3"><div class="label">Per week</div><div class="value" id="k-freq">–</div><div class="sub">avg over completed weeks</div></div>
+  <div class="card kpi span-3"><div class="label">Avg session</div><div class="value" id="k-dur">–</div><div class="sub">minutes</div></div>
+  <div class="card kpi span-3"><div class="label">Weekly streak</div><div class="value" id="k-streak">–</div><div class="sub">consecutive weeks trained</div></div>
+
+  <div class="card span-6"><h2>Workouts per week</h2><div class="chart-box"><canvas id="c-freq"></canvas></div></div>
+  <div class="card span-6"><h2>Weekly volume <small id="vol-unit"></small></h2><div class="chart-box"><canvas id="c-vol"></canvas></div></div>
+
+  <div class="card span-12">
+    <h2>Hard sets per muscle group <small>primary = 1, secondary = 0.5 · warmups excluded</small></h2>
+    <div style="overflow-x:auto"><table class="heat" id="heat"></table></div>
+  </div>
+
+  <div class="card span-8">
+    <h2>Exercise progress</h2>
+    <div class="row"><select id="ex-select" style="max-width:100%"></select></div>
+    <div class="chart-box"><canvas id="c-ex"></canvas></div>
+    <div class="scroll" style="max-height:240px;margin-top:12px"><table id="ex-table"></table></div>
+  </div>
+  <div class="card span-4">
+    <h2>Last 8 weeks <small>best e1RM, recent vs earlier half</small></h2>
+    <div class="scroll" style="max-height:560px"><table id="prog"></table></div>
+  </div>
+
+  <div class="card span-5">
+    <h2>Workouts</h2>
+    <div class="row"><input id="w-filter" placeholder="Filter by title…" style="flex:1"></div>
+    <div class="wlist" id="wlist"></div>
+  </div>
+  <div class="card span-7"><h2 id="wd-title">Workout detail</h2><div id="wdetail" class="empty">Select a workout</div></div>
+
+  <div class="card span-12">
+    <h2>Personal records</h2>
+    <div class="row"><input id="pr-filter" placeholder="Filter exercises…" style="flex:1;max-width:320px"></div>
+    <div class="scroll"><table id="prs"></table></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let D, unit = 'kg';
+const conv = kg => kg == null ? null : unit === 'lbs' ? kg * 2.20462 : kg;
+const fmtW = kg => kg == null ? '–' : (Math.round(conv(kg) * 10) / 10).toLocaleString();
+const fmtDate = iso => new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const shortWeek = k => new Date(k + 'T00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const charts = {};
+
+function setStr(s) {
+  const p = [];
+  if (s.weight_kg != null && s.reps != null) p.push(`${fmtW(s.weight_kg)} × ${s.reps}`);
+  else if (s.reps != null) p.push(`${s.reps} reps`);
+  else if (s.weight_kg != null) p.push(`${fmtW(s.weight_kg)} ${unit}`);
+  if (s.distance_meters != null) p.push(`${s.distance_meters} m`);
+  if (s.duration_seconds != null) p.push(`${Math.floor(s.duration_seconds / 60)}:${String(s.duration_seconds % 60).padStart(2, '0')}`);
+  if (s.rpe != null) p.push(`@${s.rpe}`);
+  const tag = { warmup: 'W', dropset: 'D', failure: 'F' }[s.type];
+  return p.join(' ') + (tag ? ` ${tag}` : '');
+}
+
+function baseOpts(extra = {}) {
+  const grid = css('--grid'), tick = css('--text-2');
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false }, tooltip: { padding: 10, cornerRadius: 8 } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: tick, maxRotation: 0, autoSkip: true } },
+      y: { beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: tick, precision: 0 } },
+    },
+    ...extra,
+  };
+}
+
+function draw(id, config) {
+  charts[id]?.destroy();
+  charts[id] = new Chart($(id), config);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function showError(e) {
+  $('error').style.display = 'block';
+  $('error').textContent = e.message;
+}
+
+async function load() {
+  try {
+    $('error').style.display = 'none';
+    D = await api(`/api/dashboard?weeks=${$('weeks').value}`);
+    unit = D.overview.unit;
+    render();
+  } catch (e) { showError(e); $('meta').textContent = 'Error'; }
+}
+
+function render() {
+  const o = D.overview;
+  $('meta').textContent = `${o.user ?? ''} · ${o.total_workouts_all_time} workouts since ${o.first_workout ?? '–'} · synced ${o.last_sync ? new Date(o.last_sync).toLocaleString() : 'never'}`;
+  $('k-workouts').textContent = o.workouts_in_window;
+  $('k-workouts-sub').textContent = `last ${o.window_weeks} weeks`;
+  $('k-freq').textContent = o.avg_workouts_per_week ?? '–';
+  $('k-dur').textContent = o.avg_session_minutes ?? '–';
+  $('k-streak').textContent = o.weekly_streak;
+  $('vol-unit').textContent = `${unit} lifted (weight × reps, working sets)`;
+
+  const labels = o.weekly.map(w => shortWeek(w.week));
+  const bar = (data, label) => ({
+    type: 'bar',
+    data: { labels, datasets: [{ label, data, backgroundColor: css('--s1'), borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'bottom', maxBarThickness: 28 }] },
+    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => `Week of ${labels[i[0].dataIndex]}` } } } }),
+  });
+  draw('c-freq', bar(o.weekly.map(w => w.workouts), 'Workouts'));
+  draw('c-vol', bar(o.weekly.map(w => w.volume), `Volume (${unit})`));
+
+  renderHeat();
+  renderExSelect();
+  renderProgression();
+  renderWorkouts();
+  renderPRs();
+  if (D.workouts.length && !document.querySelector('.witem.active')) showWorkout(D.workouts[0].id);
+}
+
+function renderHeat() {
+  const { weeks, muscles } = D.muscles;
+  const rows = Object.entries(muscles).filter(([m]) => m !== 'cardio')
+    .map(([m, arr]) => [m, arr, arr.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, arr.length - 1)])
+    .sort((a, b) => b[2] - a[2]);
+  if (!rows.length) { $('heat').innerHTML = '<tr><td class="empty">No data</td></tr>'; return; }
+  const max = Math.max(...rows.flatMap(r => r[1]), 1);
+  const rgb = css('--seq-rgb');
+  $('heat').innerHTML =
+    `<tr><th></th>${weeks.map((w, i) => `<th>${shortWeek(w)}${i === weeks.length - 1 ? '*' : ''}</th>`).join('')}<th class="num">avg</th></tr>` +
+    rows.map(([m, arr, avg]) => `<tr><td class="m">${esc(m.replace(/_/g, ' '))}</td>${arr.map((v, i) => {
+      const a = v ? 0.12 + 0.88 * (v / max) : 0;
+      const ink = a > 0.55 ? '#fff' : 'var(--text)';
+      return `<td title="${esc(m)} · week of ${weeks[i]}: ${v} sets" style="background:${v ? `rgba(${rgb},${a})` : 'var(--seq-0)'};color:${v ? ink : 'var(--muted)'}">${v ? Math.round(v * 10) / 10 : '·'}</td>`;
+    }).join('')}<td class="num">${avg.toFixed(1)}</td></tr>`).join('');
+}
+
+function renderExSelect() {
+  const sel = $('ex-select'), prev = sel.value;
+  sel.innerHTML = D.exercises.map(e => `<option value="${e.id}">${esc(e.title)} (${e.sessions})</option>`).join('');
+  if (prev && D.exercises.some(e => e.id === prev)) sel.value = prev;
+  if (D.exercises.length) loadExercise(sel.value);
+}
+
+async function loadExercise(id) {
+  const { sessions } = await api(`/api/exercise?id=${encodeURIComponent(id)}`);
+  const s1 = css('--s1'), s2 = css('--s2');
+  const hasWeight = sessions.some(s => s.top_weight_kg != null);
+  const ds = hasWeight ? [
+    { label: `Est. 1RM (${unit})`, data: sessions.map(s => s.e1rm_kg && +conv(s.e1rm_kg).toFixed(1)), borderColor: s1, backgroundColor: s1 },
+    { label: `Top set weight (${unit})`, data: sessions.map(s => s.top_weight_kg != null ? +conv(s.top_weight_kg).toFixed(1) : null), borderColor: s2, backgroundColor: s2 },
+  ] : [{ label: 'Max reps', data: sessions.map(s => s.max_reps), borderColor: s1, backgroundColor: s1 }];
+  draw('c-ex', {
+    type: 'line',
+    data: { labels: sessions.map(s => s.date), datasets: ds.map(d => ({ ...d, borderWidth: 2, pointRadius: sessions.length > 40 ? 0 : 3, pointHoverRadius: 5, spanGaps: true, tension: 0.2 })) },
+    options: baseOpts({
+      plugins: { legend: { display: ds.length > 1, position: 'top', align: 'start', labels: { color: css('--text-2'), boxWidth: 12, boxHeight: 2 } } },
+      scales: { ...baseOpts().scales, y: { ...baseOpts().scales.y, beginAtZero: false } },
+    }),
+  });
+  $('ex-table').innerHTML = `<tr><th>Date</th><th class="num">Top set</th><th class="num">e1RM</th><th class="num">Sets</th><th>All sets</th></tr>` +
+    [...sessions].reverse().map(s => `<tr><td>${s.date}</td><td class="num">${s.top_weight_kg != null ? `${fmtW(s.top_weight_kg)} × ${s.top_reps}` : `${s.max_reps} reps`}</td><td class="num">${fmtW(s.e1rm_kg)}</td><td class="num">${s.working_sets}</td><td style="white-space:normal;color:var(--text-2)">${s.sets.map(setStr).map(esc).join(', ')}</td></tr>`).join('');
+}
+
+function renderProgression() {
+  const p = D.progression;
+  $('prog').innerHTML = p.length
+    ? `<tr><th>Exercise</th><th class="num">Δ e1RM</th><th>Status</th></tr>` + p.map(r =>
+      `<tr title="${fmtW(r.early_e1rm_kg)} → ${fmtW(r.recent_e1rm_kg)} ${unit}, ${r.sessions} sessions"><td style="white-space:normal">${esc(r.title)}</td><td class="num">${r.change_pct > 0 ? '+' : ''}${r.change_pct}%</td><td><span class="badge ${r.status}">${r.status}</span></td></tr>`).join('')
+    : '<tr><td class="empty">Not enough recent data</td></tr>';
+}
+
+function renderWorkouts() {
+  const q = $('w-filter').value.toLowerCase();
+  const list = D.workouts.filter(w => w.title.toLowerCase().includes(q));
+  $('wlist').innerHTML = list.slice(0, 300).map(w =>
+    `<div class="witem" data-id="${w.id}"><div class="t">${esc(w.title)}</div><div class="d">${fmtDate(w.start_time)} · ${w.duration_min} min · ${w.exercises} exercises · ${w.sets} sets · ${Math.round(conv(w.volume_kg)).toLocaleString()} ${unit}</div></div>`).join('')
+    || '<div class="empty">No workouts</div>';
+}
+
+async function showWorkout(id) {
+  document.querySelectorAll('.witem').forEach(el => el.classList.toggle('active', el.dataset.id === id));
+  const w = await api(`/api/workout?id=${encodeURIComponent(id)}`);
+  $('wd-title').textContent = `${w.title} — ${fmtDate(w.start_time)}`;
+  $('wdetail').className = '';
+  $('wdetail').innerHTML = (w.description ? `<p class="ex note">${esc(w.description)}</p>` : '') +
+    [...w.exercises].sort((a, b) => a.index - b.index).map(ex => `<div class="ex">
+      <div class="name">${esc(ex.title)}${ex.superset_id != null ? ` <small style="color:var(--muted)">superset ${ex.superset_id}</small>` : ''}</div>
+      ${ex.notes ? `<div class="note">${esc(ex.notes)}</div>` : ''}
+      <div class="sets">${ex.sets.map(s => `<span class="set ${s.type}">${esc(setStr(s))}</span>`).join('')}</div></div>`).join('');
+}
+
+function renderPRs() {
+  const q = $('pr-filter').value.toLowerCase();
+  const rows = D.records.filter(r => r.title.toLowerCase().includes(q));
+  $('prs').innerHTML = `<tr><th>Exercise</th><th>Muscle</th><th class="num">Sessions</th><th class="num">Heaviest</th><th>Date</th><th class="num">Best e1RM</th><th>Date</th><th class="num">Max reps</th></tr>` +
+    rows.map(r => `<tr><td>${esc(r.title)}</td><td style="color:var(--text-2)">${esc((r.muscle ?? '').replace(/_/g, ' '))}</td><td class="num">${r.sessions}</td>
+      <td class="num">${r.heaviest ? `${fmtW(r.heaviest.weight_kg)} × ${r.heaviest.reps ?? '–'}` : '–'}</td><td>${r.heaviest?.date ?? ''}</td>
+      <td class="num">${r.best_e1rm ? fmtW(r.best_e1rm.kg) : '–'}</td><td>${r.best_e1rm?.date ?? ''}</td>
+      <td class="num">${r.most_reps?.reps ?? '–'}</td></tr>`).join('');
+}
+
+$('weeks').onchange = load;
+$('ex-select').onchange = e => loadExercise(e.target.value);
+$('w-filter').oninput = renderWorkouts;
+$('pr-filter').oninput = renderPRs;
+$('wlist').onclick = e => { const el = e.target.closest('.witem'); if (el) showWorkout(el.dataset.id); };
+$('sync').onclick = async e => {
+  e.target.disabled = true; e.target.textContent = 'Syncing…';
+  try { await api('/api/sync', { method: 'POST' }); await load(); }
+  catch (err) { showError(err); }
+  finally { e.target.disabled = false; e.target.textContent = 'Sync'; }
+};
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => D && render());
+load();
+</script>
+</body>
+</html>

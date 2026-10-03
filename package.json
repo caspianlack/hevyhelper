@@ -1,0 +1,22 @@
+{
+  "name": "hevyhelper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Hevy workout viewer + MCP server so Claude can analyse your training",
+  "scripts": {
+    "sync": "node sync.mjs",
+    "sync:full": "node sync.mjs --full",
+    "start": "node server.mjs",
+    "mcp": "node mcp.mjs"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "openai": "^7.27.0",
+    "zod": "^4.6.5"
+  }
+}
